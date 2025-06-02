@@ -1,10 +1,19 @@
-# Exploratory Data Analysis
+# ML Workflow: Sleep Cycle and Mood Score Analysis
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.model_selection import GridSearchCV, cross_val_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 # Set plotting style for consistency
 plt.style.use('ggplot')
@@ -131,9 +140,6 @@ if 'Age' in df.columns:
     plt.tight_layout()
     plt.savefig("figures/age_distribution.png")
     plt.close()
-
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 '''
 1. Define the Objective
 - Goal: Build a regression model to predict Mood Score (1–10) from 10 input features.
@@ -314,6 +320,12 @@ plt.show()
 
 print(df_1['Mood Score'].value_counts().sort_index())
 
+# Pairplot (added for EDA)
+sns.pairplot(df[['Mood Score', 'Total Sleep Hours', 'Work Hours (hrs/day)',
+                 'Caffeine Intake (mg)', 'Stress Level']])
+plt.suptitle("Pairplot of Key Features", y=1.02)
+plt.show()
+
 '''
 6. Feature Engineering
 - Time features: convert Sleep Start Time (e.g., 23.33) into a cyclic feature:
@@ -350,6 +362,15 @@ scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
+# PCA trial (not used in final model)
+pca = PCA(n_components=5)
+X_pca = pca.fit_transform(X_train_scaled)
+explained = pca.explained_variance_ratio_
+print(f"\nExplained variance by first 5 PCA components: {explained}")
+
+# We tried PCA, but since the top 5 components only explain limited variance,
+# we did not use it in the final model.
+
 '''
 9. Model Selection & Baseline
 - Baseline model: simple linear regression to gauge baseline performance.
@@ -371,13 +392,6 @@ Root Mean Squared Error (RMSE)
 R² score
 Compare cross-validated performance of models and select the best.
 '''
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import GridSearchCV, cross_val_score
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import numpy as np
-import pandas as pd
 
 # Assuming X_train_scaled, X_test_scaled, y_train, y_test are already defined
 
@@ -434,24 +448,97 @@ for name, metrics in results.items():
     print(f"  R2: {metrics['R2']:.4f}")
     print("\n") # Add an empty line for better readability
 
+
+#Final Model & Test Set Validation
+
+# Model: Gradient Boosting Regressor
+model = GradientBoostingRegressor(n_estimators=100, learning_rate=0.1, max_depth=3, random_state=42)
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+# Evaluation
+mae = mean_absolute_error(y_test, y_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+r2 = r2_score(y_test, y_pred)
+
+print(f"\nModel Evaluation:")
+print(f"MAE: {mae:.4f}")
+print(f"RMSE: {rmse:.4f}")
+print(f"R² Score: {r2:.4f}")
+
+# Residuals plot
+residuals = y_test - y_pred
+plt.figure(figsize=(8, 5))
+sns.scatterplot(x=y_pred, y=residuals)
+plt.axhline(0, linestyle='--', color='red')
+plt.xlabel('Predicted Mood Score')
+plt.ylabel('Residuals')
+plt.title('Residuals vs. Predicted Mood Score')
+plt.tight_layout()
+plt.show()
+
+# Feature importances
+importances = pd.Series(model.feature_importances_, index=features).sort_values(ascending=False)
+print("\nFeature Importances:\n", importances)
+
 '''
-12. Final Model & Test Set Validation
+-------------------------------
+Interpretation and Discussion
+-------------------------------
 
-Retrain the selected model on the full training data with optimal hyperparameters.
+TECHNICAL DEPLOYMENT:
+----------------------
+The trained model can be deployed via a RESTful API using Flask or FastAPI.
+It would expose an endpoint like /predict, accept JSON input with preprocessed features,
+and return the predicted Mood Score.
+For full deployment, you can use Docker to containerize the app and deploy to AWS or Azure.
 
-Evaluate on the held-out test set to estimate real-world performance.
+DOMAIN INSIGHT:
+----------------
+Although individual correlations with Mood Score are weak, Gradient Boosting captures
+nonlinear patterns.
+Features like 'Work Hours', 'Sleep Hours', 'Exercise' and 'Caffeine Intake' had the highest importance.
+These align well with intuition — physical and lifestyle patterns moderately influence mood.
 
-13. Error Analysis
+SOCIETAL REFLECTION:
+---------------------
+A model like this could be used in health tech or workplace wellness to proactively support mental health.
+However, using mood prediction at scale raises ethical concerns:
+ - Privacy: Personal sleep and health data is sensitive.
+ - Misuse: Employers or insurers may misuse predictions to make decisions about individuals.
+ - Fairness: Mood is influenced by socio-cultural factors not present in the data.
 
-Plot residuals vs. predictions to check for patterns.
+Therefore, deployment must ensure transparency, user consent, and fairness monitoring.
 
-Identify cases with high prediction error and investigate feature values.
+FINAL CONCLUSION: Why This Dataset Fails for Predictive Modeling
+---------------------
+Despite following a full machine learning pipeline — including thorough data cleaning, scaling, feature engineering, 
+model selection, and evaluation — the results suggest that this dataset is not suitable for reliable prediction of Mood Score 
+using machine learning. 
 
-14. Model Interpretation & Reporting
+Here's why, from a technical standpoint:
 
-Linear Regression: analyze coefficients to understand feature impact.
+1. Extremely Low Feature-Label Correlation
+The Pearson correlation coefficients between all features and the target (Mood Score) are close to zero (mostly in the range of −0.02 to +0.02).
 
-kNN: use Partial Dependence Plots if needed to illustrate nonlinear effects.
+This means there is no linear relationship between individual input features and the output.
 
-Summarize findings, strengths, and limitations in a report.
+Even complex models like Gradient Boosting, which can learn nonlinear patterns, 
+failed to extract strong signals — their R² score is very low (often near 0.0), meaning the model explains 
+almost none of the variance in the data.
+
+2. Uniform Target Distribution
+The Mood Score is evenly distributed between 1 and 10.
+
+While this looks ideal from a balance standpoint, the problem is that the model never learns to favor 
+one score over another — because there is no distinguishable feature profile associated with any specific mood.
+
+3. Lack of Feature Variance Impact on Target
+Even with transformations like:
+ -Standardization
+ -Complex interactions via Gradient Boosting
+
+...the model fails to improve beyond a baseline predictor.
+
+PCA further confirms this — the principal components do not capture any strong structure that aligns with Mood Score.
 '''
